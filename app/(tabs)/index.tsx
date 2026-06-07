@@ -50,6 +50,7 @@ export default function Subscriptions() {
     setSubmitting(true);
     const { error } = await supabase.from('subscriptions').insert([
       {
+        user_id: session.user.id,
         name: form.name,
         amount: parseFloat(form.amount),
         next_charge_date: form.nextChargeDate,
