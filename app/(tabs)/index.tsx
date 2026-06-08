@@ -54,6 +54,7 @@ const STRINGS = {
   en: {
     tagline: 'Financial clarity, simplified.', email: 'Email', password: 'Password',
     continueEmail: 'Continue with Email', pleaseWait: 'Please wait\u2026', createAccount: 'Create Account',
+    preferredName: 'Preferred name',
     or: 'OR', continueApple: 'Continue with Apple', continueGoogle: 'Continue with Google',
     legalShort: 'Privacy Policy   \u00B7   Terms of Service',
     greet: { morning: 'Good Morning', afternoon: 'Good Afternoon', evening: 'Good Evening' },
@@ -228,6 +229,11 @@ export default function Sentinel() {
   const [showBal, setShowBal] = useState(false);
   const [subSort, setSubSort] = useState('soonest');
 
+  const [displayName, setDisplayName] = useState('');
+  const [signupName, setSignupName] = useState('');
+  const [showPolicy, setShowPolicy] = useState(false);
+  const pendingName = useRef(null);
+
   const L = STRINGS[lang] || STRINGS.en;
 
   useEffect(() => {
@@ -236,9 +242,15 @@ export default function Sentinel() {
       if (data.session) loadAll();
       setLoading(false);
     });
-    const { data: l } = supabase.auth.onAuthStateChange((_e, s) => {
+    const { data: l } = supabase.auth.onAuthStateChange(async (_e, s) => {
       setSession(s);
-      if (s) loadAll();
+      if (s) {
+        if (pendingName.current) {
+          await supabase.from('user_settings').upsert({ user_id: s.user.id, display_name: pendingName.current, updated_at: new Date().toISOString() });
+          pendingName.current = null;
+        }
+        loadAll();
+      }
     });
     return () => l?.subscription.unsubscribe();
   }, []);
@@ -249,6 +261,7 @@ export default function Sentinel() {
     if (data) {
       setBalance(Number(data.balance) || 0); setTarget(Number(data.target_spend) || 0);
       setBaseCur(data.base_currency || 'USD'); setLang(data.language || 'en');
+      setDisplayName(data.display_name || '');
     }
   };
   const loadTxs = async () => {
@@ -271,9 +284,27 @@ export default function Sentinel() {
 
   const signUp = async () => {
     setBusy(true);
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (!error && signupName.trim()) {
+      pendingName.current = signupName.trim();
+      if (data.session) {
+        await supabase.from('user_settings').upsert({ user_id: data.user.id, display_name: signupName.trim(), updated_at: new Date().toISOString() });
+        setDisplayName(signupName.trim());
+      }
+    }
     Alert.alert(error ? 'Error' : 'OK', error ? error.message : L.createAccount);
     setBusy(false);
+  };
+  const editName = () => {
+    Alert.prompt(
+      (L.preferredName || 'Preferred name'), '',
+      async (text) => {
+        const v = (text || '').trim();
+        setDisplayName(v);
+        if (session) await supabase.from('user_settings').upsert({ user_id: session.user.id, display_name: v, updated_at: new Date().toISOString() });
+      },
+      'plain-text', displayName
+    );
   };
   const login = async () => {
     setBusy(true);
@@ -310,7 +341,7 @@ export default function Sentinel() {
   const catMax = topCats.length ? topCats[0][1] : 1;
 
   const sym = SYMBOL[baseCur] || '$';
-  const name = session?.user?.email ? session.user.email.split('@')[0] : '';
+  const name = displayName || (session?.user?.email ? session.user.email.split('@')[0] : '');
   const greeting = now.getHours() < 12 ? L.greet.morning : now.getHours() < 18 ? L.greet.afternoon : L.greet.evening;
 
   if (loading) {
@@ -330,6 +361,7 @@ export default function Sentinel() {
             <Text style={{ fontSize: 34, fontWeight: '700', color: t.text, letterSpacing: 6 }}>SENTINEL</Text>
             <Text style={{ fontSize: 15, color: t.sub, marginTop: 10 }}>{L.tagline}</Text>
           </View>
+          <TextInput placeholder={`${L.preferredName || 'Preferred name'} (${(L.createAccount || 'Create Account').toLowerCase()})`} placeholderTextColor={t.faint} value={signupName} onChangeText={setSignupName} autoCapitalize="words" style={{ backgroundColor: t.bg2, borderRadius: 14, padding: 16, fontSize: 15, color: t.text, marginBottom: 12 }} />
           <TextInput placeholder={L.email} placeholderTextColor={t.faint} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" style={{ backgroundColor: t.bg2, borderRadius: 14, padding: 16, fontSize: 15, color: t.text, marginBottom: 12 }} />
           <TextInput placeholder={L.password} placeholderTextColor={t.faint} value={password} onChangeText={setPassword} secureTextEntry style={{ backgroundColor: t.bg2, borderRadius: 14, padding: 16, fontSize: 15, color: t.text, marginBottom: 20 }} />
           <Press onPress={login} disabled={busy} style={{ backgroundColor: t.graphite, borderRadius: 14, paddingVertical: 17, marginBottom: 12 }}>
@@ -351,8 +383,11 @@ export default function Sentinel() {
             <Ionicons name="logo-google" size={18} color={t.text} />
             <Text style={{ color: t.text, fontWeight: '600', fontSize: 15, marginLeft: 8 }}>{L.continueGoogle}</Text>
           </Press>
-          <Text style={{ textAlign: 'center', color: t.faint, fontSize: 12, marginTop: 30 }}>{L.legalShort}</Text>
+          <Pressable onPress={() => setShowPolicy(true)}>
+            <Text style={{ textAlign: 'center', color: t.faint, fontSize: 12, marginTop: 30, textDecorationLine: 'underline' }}>{L.legalShort}</Text>
+          </Pressable>
         </ScrollView>
+        <PolicyModal visible={showPolicy} onClose={() => setShowPolicy(false)} t={t} />
       </View>
     );
   }
@@ -519,6 +554,7 @@ export default function Sentinel() {
       <Text style={{ color: t.faint, fontSize: 12, letterSpacing: 1, marginBottom: 6, marginLeft: 4 }}>{L.account}</Text>
       <Card style={{ marginBottom: 22, paddingVertical: 4 }}>
         <SettingsRow icon="person-outline" label={L.email} value={session.user.email} />
+        <SettingsRow icon="happy-outline" label={L.preferredName || 'Preferred name'} value={displayName || '\u2014'} onPress={editName} />
         <SettingsRow icon="card-outline" label={L.baseCurrency} value={baseCur} onPress={() => setShowBal(true)} />
         <View style={{ height: 1 }} />
       </Card>
@@ -530,7 +566,9 @@ export default function Sentinel() {
       <Press onPress={() => supabase.auth.signOut()} style={{ borderWidth: 1, borderColor: t.cardLine, borderRadius: 14, paddingVertical: 15 }}>
         <Text style={{ color: t.warn, textAlign: 'center', fontWeight: '600', fontSize: 15 }}>{L.signOut}</Text>
       </Press>
-      <Text style={{ textAlign: 'center', color: t.faint, fontSize: 12, marginTop: 20 }}>{L.legalFull}</Text>
+      <Pressable onPress={() => setShowPolicy(true)}>
+        <Text style={{ textAlign: 'center', color: t.faint, fontSize: 12, marginTop: 20, textDecorationLine: 'underline' }}>{L.legalFull}</Text>
+      </Pressable>
     </ScrollView>
   );
 
@@ -549,6 +587,7 @@ export default function Sentinel() {
       </View>
       <AddSheet visible={showAdd} onClose={() => setShowAdd(false)} t={t} L={L} lang={lang} baseCur={baseCur} balance={balance} userId={session.user.id} onSaved={() => { loadTxs(); loadSubs(); }} onBalanceChange={setBalanceDB} />
       <BalanceSheet visible={showBal} onClose={() => setShowBal(false)} t={t} L={L} userId={session.user.id} balance={balance} target={target} baseCur={baseCur} onSaved={(b, tg, c) => { setBalance(b); setTarget(tg); setBaseCur(c); }} />
+      <PolicyModal visible={showPolicy} onClose={() => setShowPolicy(false)} t={t} />
     </View>
   );
 }
@@ -666,6 +705,47 @@ function BalanceSheet({ visible, onClose, t, L, userId, balance, target, baseCur
             {CURRENCIES.map((c) => (<Press key={c} onPress={() => setCur(c)} style={{ paddingVertical: 9, paddingHorizontal: 15, borderRadius: 10, marginRight: 8, backgroundColor: cur === c ? t.graphite : t.bg2 }}><Text style={{ color: cur === c ? t.onGraphite : t.sub, fontSize: 13, fontWeight: '600' }}>{c}</Text></Press>))}
           </ScrollView>
           <Press onPress={save} disabled={busy} style={{ backgroundColor: t.graphite, borderRadius: 16, paddingVertical: 18 }}><Text style={{ color: t.onGraphite, textAlign: 'center', fontWeight: '600', fontSize: 16 }}>{busy ? L.saving : L.save}</Text></Press>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/* ============================================================
+   POLICY / LEGAL MODAL
+   ============================================================ */
+function PolicyModal({ visible, onClose, t }) {
+  const Section = ({ title, children }) => (
+    <View style={{ marginBottom: 26 }}>
+      <Text style={{ color: t.text, fontSize: 18, fontWeight: '700', marginBottom: 10 }}>{title}</Text>
+      <Text style={{ color: t.sub, fontSize: 14, lineHeight: 21 }}>{children}</Text>
+    </View>
+  );
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: t.bg }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 22 }}>
+          <Text style={{ color: t.text, fontSize: 22, fontWeight: '700' }}>Legal</Text>
+          <Pressable onPress={onClose}><Ionicons name="close" size={26} color={t.sub} /></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 22, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+          <Text style={{ color: t.faint, fontSize: 12, marginBottom: 22 }}>Last updated: June 2026</Text>
+
+          <Section title="Privacy Policy">
+            Sentinel collects only what it needs to run: your email address, an optional preferred name, and the financial entries you choose to add (amounts, categories, dates, and subscriptions). This information is stored securely and is tied to your account. Each account can only access its own data, enforced at the database level. We do not sell your data, and we do not share it with third parties for advertising. You can request deletion of your account and all associated data at any time by contacting support.
+          </Section>
+
+          <Section title="Terms of Service">
+            Sentinel is a personal finance tracking tool provided on an "as is" basis. It helps you record and review your own spending, balances, and recurring payments. Sentinel is not a bank, is not financial advice, and does not move or hold money. You are responsible for the accuracy of the information you enter. You agree not to misuse the service, attempt unauthorized access, or use it for unlawful purposes. We may update the app and these terms over time; continued use means you accept the current version.
+          </Section>
+
+          <Section title="Data Policy">
+            Your data is stored on secure cloud infrastructure (Supabase). Currency conversions in the app use approximate, periodically-updated rates and are estimates only, not exact financial figures. We retain your data for as long as your account is active. You may request a copy of your data, or its permanent deletion, by contacting support. Removing the app from your device does not automatically delete your stored account data.
+          </Section>
+
+          <Text style={{ color: t.faint, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+            Questions about any of the above? Contact support@sentinel.app
+          </Text>
         </ScrollView>
       </View>
     </Modal>
