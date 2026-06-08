@@ -9,8 +9,9 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
-    },
+  "supportsTablet": true,
+  "bundleIdentifier": "com.tsimur.sentinel"
+},
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
