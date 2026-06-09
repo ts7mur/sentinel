@@ -9,9 +9,13 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-  "supportsTablet": true,
-  "bundleIdentifier": "com.tsimur.sentinel"
-},
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ts7mur.sentinel",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -44,6 +48,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "cc2d2f16-2aa5-422d-ac78-66800609a3db"
+      }
     }
   }
 }

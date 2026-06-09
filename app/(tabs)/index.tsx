@@ -1,38 +1,63 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TextInput, Pressable, Modal, useColorScheme,
-  ActivityIndicator, Alert, Animated, StatusBar,
+  ActivityIndicator, Alert, Animated, StatusBar, KeyboardAvoidingView, useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
+import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabaseClient';
+import Tools from '../../components/Tools';
+import Goals from '../../components/Goals';
 
 WebBrowser.maybeCompleteAuthSession();
+
+const ASSET_KINDS = [
+  ['cash', 'Cash', 'cash-outline'],
+  ['bank', 'Bank', 'card-outline'],
+  ['crypto', 'Crypto', 'logo-bitcoin'],
+  ['real_estate', 'Real estate', 'home-outline'],
+  ['business', 'Business', 'briefcase-outline'],
+  ['investments', 'Investments', 'trending-up-outline'],
+];
+const ASSET_LABEL = { cash: 'Cash', bank: 'Bank', crypto: 'Crypto', real_estate: 'Real estate', business: 'Business', investments: 'Investments' };
+const ASSET_ICON = { cash: 'cash-outline', bank: 'card-outline', crypto: 'logo-bitcoin', real_estate: 'home-outline', business: 'briefcase-outline', investments: 'trending-up-outline' };
 
 /* ============================================================
    THEME
    ============================================================ */
 const palette = (dark) => ({
-  bg: dark ? '#0B0B0B' : '#FFFFFF',
-  bg2: dark ? '#151515' : '#F7F7F7',
-  card: dark ? '#151515' : '#FFFFFF',
-  cardLine: dark ? '#232323' : '#ECECEC',
-  text: dark ? '#FFFFFF' : '#111111',
-  sub: dark ? '#B0B0B0' : '#888888',
-  faint: dark ? '#6E6E6E' : '#AFAFAF',
-  graphite: dark ? '#E5E5E7' : '#1C1C1E',
-  onGraphite: dark ? '#0B0B0B' : '#FFFFFF',
-  blue: '#0A84FF',
-  warn: dark ? '#FF6B6B' : '#D14343',
-  shadow: '#000000',
+  bg: dark ? '#090A0C' : '#F8F7F3',
+  bg2: dark ? '#131519' : '#EFEEE8',
+  card: dark ? '#15171C' : '#FFFFFF',
+  cardLine: dark ? '#262A31' : '#E3E0D7',
+  text: dark ? '#F7F5EF' : '#151515',
+  sub: dark ? '#B5B3AB' : '#6F6A61',
+  faint: dark ? '#747168' : '#A29B90',
+  graphite: dark ? '#F2EFE4' : '#171A20',
+  onGraphite: dark ? '#101115' : '#FFFFFF',
+  blue: '#3A79FF',
+  green: '#34C759',
+  gold: '#B9852C',
+  mint: '#2DBE9F',
+  warn: dark ? '#FF7A70' : '#C8443A',
+  input: dark ? '#111318' : '#F2F0EA',
+  shadow: dark ? 'rgba(0, 0, 0, 0)' : 'rgba(34, 26, 12, 0.12)',
 });
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'AED', 'RUB', 'CAD', 'AUD', 'JPY', 'CHF'];
 const SYMBOL = { USD: '$', EUR: '\u20AC', GBP: '\u00A3', AED: 'AED ', RUB: '\u20BD', CAD: 'C$', AUD: 'A$', JPY: '\u00A5', CHF: 'CHF ' };
+const sym0 = (c) => SYMBOL[c] || '$';
 // approximate static rates per 1 USD (no API; refine later with live rates)
 const RATES = { USD: 1, EUR: 0.92, GBP: 0.79, AED: 3.67, RUB: 92, CAD: 1.36, AUD: 1.52, JPY: 150, CHF: 0.88 };
 const convert = (amt, from, to) => (Number(amt) / (RATES[from] || 1)) * (RATES[to] || 1);
+const parseMoney = (v) => {
+  const n = parseFloat(String(v || '').replace(/,/g, ''));
+  return Number.isFinite(n) ? n : 0;
+};
+const formatMoney = (n, sym = '$', digits = 0) => `${sym}${(Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+const tap = () => Haptics.selectionAsync().catch(() => {});
 
 const TX_TYPES = ['Spend', 'Subscription', 'Rent', 'Insurance', 'Utilities', 'Salary', 'Investment', 'Savings', 'Other'];
 const RECURRING = ['Subscription', 'Rent', 'Insurance'];
@@ -179,9 +204,9 @@ function AnimatedNumber({ value, prefix = '', t, size = 44, weight = '700' }) {
     const id = anim.addListener(({ value: v }) => setDisplay(v));
     Animated.timing(anim, { toValue: value || 0, duration: 850, useNativeDriver: false }).start();
     return () => anim.removeListener(id);
-  }, [value]);
+  }, [anim, value]);
   return (
-    <Text style={{ fontSize: size, fontWeight: weight, color: t.text, letterSpacing: -1.5 }}>
+    <Text style={{ fontSize: size, fontWeight: weight, color: t.text, letterSpacing: 0, fontVariant: ['tabular-nums'] }}>
       {prefix}{display.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
     </Text>
   );
@@ -189,15 +214,331 @@ function AnimatedNumber({ value, prefix = '', t, size = 44, weight = '700' }) {
 
 function Press({ children, onPress, disabled, style }) {
   const scale = useRef(new Animated.Value(1)).current;
+  const handlePress = () => {
+    tap();
+    onPress && onPress();
+  };
   return (
     <Pressable
       disabled={disabled}
-      onPress={onPress}
+      onPress={handlePress}
       onPressIn={() => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, speed: 50, bounciness: 0 }).start()}
       onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 6 }).start()}
     >
       <Animated.View style={[{ transform: [{ scale }] }, style]}>{children}</Animated.View>
     </Pressable>
+  );
+}
+
+function FadeIn({ children, delay = 0, y = 14, style }) {
+  const value = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(value, { toValue: 1, duration: 650, delay, useNativeDriver: true }).start();
+  }, [delay, value]);
+  return (
+    <Animated.View style={[{
+      opacity: value,
+      transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [y, 0] }) }],
+    }, style]}>
+      {children}
+    </Animated.View>
+  );
+}
+
+function FieldBox({ t, value, onChangeText, placeholder, secureTextEntry, keyboardType, autoCapitalize = 'none', prefix }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.input, borderRadius: 16, borderWidth: 1, borderColor: t.cardLine, paddingHorizontal: 16 }}>
+      {prefix ? <Text style={{ color: t.sub, fontSize: 18, fontWeight: '700', marginRight: 6 }}>{prefix}</Text> : null}
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={t.faint}
+        secureTextEntry={secureTextEntry}
+        keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        style={{ flex: 1, color: t.text, fontSize: 15, paddingVertical: 16 }}
+      />
+    </View>
+  );
+}
+
+function PremiumButton({ t, children, onPress, disabled, secondary, icon }) {
+  return (
+    <Press
+      onPress={onPress}
+      disabled={disabled}
+      style={{
+        backgroundColor: secondary ? 'transparent' : t.graphite,
+        borderColor: secondary ? t.cardLine : t.graphite,
+        borderWidth: 1,
+        borderRadius: 16,
+        paddingVertical: 16,
+        paddingHorizontal: 18,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: disabled ? 0.65 : 1,
+      }}
+    >
+      {icon ? <Ionicons name={icon} size={18} color={secondary ? t.text : t.onGraphite} style={{ marginRight: 8 }} /> : null}
+      <Text style={{ color: secondary ? t.text : t.onGraphite, fontWeight: '700', fontSize: 15 }}>{children}</Text>
+    </Press>
+  );
+}
+
+function AuthScreen({ t, dark, L, email, password, signupName, busy, showPolicy, setEmail, setPassword, setSignupName, setShowPolicy, login, signUp, signInWithGoogle }) {
+  const { width } = useWindowDimensions();
+  const compact = width < 380;
+  return (
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior="padding">
+      <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
+      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: 56, paddingBottom: 34, justifyContent: 'center' }} showsVerticalScrollIndicator={false}>
+        <FadeIn>
+          <View style={{ alignSelf: 'center', width: 72, height: 72, borderRadius: 24, backgroundColor: t.graphite, alignItems: 'center', justifyContent: 'center', marginBottom: 28 }}>
+            <Ionicons name="shield-checkmark" size={34} color={t.onGraphite} />
+          </View>
+        </FadeIn>
+
+        <FadeIn delay={90}>
+          <Text style={{ color: t.text, textAlign: 'center', fontSize: compact ? 36 : 42, fontWeight: '800', letterSpacing: 0 }}>Sentinel</Text>
+          <Text style={{ color: t.sub, textAlign: 'center', fontSize: 15, lineHeight: 22, marginTop: 10, marginBottom: 30 }}>{L.tagline}</Text>
+        </FadeIn>
+
+        <FadeIn delay={170}>
+          <View style={{ backgroundColor: t.card, borderRadius: 24, borderWidth: 1, borderColor: t.cardLine, padding: 18, gap: 12, boxShadow: dark ? 'none' : '0 18px 44px rgba(34, 26, 12, 0.10)' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 2 }}>
+              <View style={{ flex: 1, height: 1, backgroundColor: t.cardLine }} />
+              <Text style={{ color: t.faint, fontSize: 12, fontWeight: '700' }}>PRIVATE FINANCE OS</Text>
+              <View style={{ flex: 1, height: 1, backgroundColor: t.cardLine }} />
+            </View>
+            <FieldBox t={t} value={signupName} onChangeText={setSignupName} placeholder={L.preferredName || 'Preferred name'} autoCapitalize="words" />
+            <FieldBox t={t} value={email} onChangeText={setEmail} placeholder={L.email} keyboardType="email-address" />
+            <FieldBox t={t} value={password} onChangeText={setPassword} placeholder={L.password} secureTextEntry />
+            <PremiumButton t={t} onPress={login} disabled={busy} icon="mail-outline">{busy ? L.pleaseWait : L.continueEmail}</PremiumButton>
+            <PremiumButton t={t} onPress={signUp} disabled={busy} secondary icon="sparkles-outline">{L.createAccount}</PremiumButton>
+          </View>
+        </FadeIn>
+
+        <FadeIn delay={260}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 22 }}>
+            <View style={{ flex: 1, height: 1, backgroundColor: t.cardLine }} />
+            <Text style={{ color: t.faint, marginHorizontal: 14, fontSize: 12 }}>{L.or}</Text>
+            <View style={{ flex: 1, height: 1, backgroundColor: t.cardLine }} />
+          </View>
+          <PremiumButton t={t} onPress={() => Alert.alert('Apple', 'TestFlight / App Store only.')} icon="logo-apple">
+            {L.continueApple}
+          </PremiumButton>
+          <View style={{ height: 12 }} />
+          <PremiumButton t={t} onPress={signInWithGoogle} disabled={busy} secondary icon="logo-google">
+            {L.continueGoogle}
+          </PremiumButton>
+          <Pressable onPress={() => setShowPolicy(true)}>
+            <Text style={{ textAlign: 'center', color: t.faint, fontSize: 12, marginTop: 26, textDecorationLine: 'underline' }}>{L.legalShort}</Text>
+          </Pressable>
+        </FadeIn>
+      </ScrollView>
+      <PolicyModal visible={showPolicy} onClose={() => setShowPolicy(false)} t={t} />
+    </KeyboardAvoidingView>
+  );
+}
+
+function OnboardingFlow({ t, dark, name, userId, baseCur, onFinish }) {
+  const [step, setStep] = useState(0);
+  const [goalName, setGoalName] = useState('Emergency fund');
+  const [goalTarget, setGoalTarget] = useState('');
+  const [goalSaved, setGoalSaved] = useState('');
+  const [goalCreated, setGoalCreated] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const stage = useRef(new Animated.Value(0)).current;
+  const sym = SYMBOL[baseCur] || '$';
+
+  useEffect(() => {
+    stage.setValue(0);
+    Animated.spring(stage, { toValue: 1, useNativeDriver: true, speed: 12, bounciness: 4 }).start();
+  }, [stage, step]);
+
+  const saveGoalIfNeeded = async () => {
+    if (saving) return;
+    const target = parseMoney(goalTarget);
+    const current = parseMoney(goalSaved);
+    if (target > 0 && userId && !goalCreated) {
+      setSaving(true);
+      const { error } = await supabase.from('goals').insert([{
+        user_id: userId,
+        name: goalName.trim() || 'First goal',
+        target_amount: target,
+        current_amount: current,
+        currency: baseCur,
+        icon: 'flag-outline',
+      }]);
+      setSaving(false);
+      if (error) { Alert.alert('Goal not saved', error.message); return false; }
+      setGoalCreated(true);
+    }
+    return true;
+  };
+
+  const finish = async () => {
+    const ok = await saveGoalIfNeeded();
+    if (!ok) return;
+    onFinish();
+  };
+
+  const next = async () => {
+    if (step === 2) {
+      const ok = await saveGoalIfNeeded();
+      if (!ok) return;
+      tap();
+      setStep(3);
+    } else if (step >= 3) {
+      finish();
+    } else {
+      tap();
+      setStep((s) => s + 1);
+    }
+  };
+  const back = () => { if (step > 0) { tap(); setStep((s) => s - 1); } };
+  const skip = () => { tap(); onFinish(); };
+
+  const translateX = stage.interpolate({ inputRange: [0, 1], outputRange: [28, 0] });
+  const pages = [
+    {
+      eyebrow: 'Welcome',
+      title: `Hi, ${name || 'there'}.`,
+      body: 'Sentinel is ready. We will keep the setup light, calm, and useful.',
+      icon: 'sparkles-outline',
+      content: (
+        <View style={{ gap: 10, marginTop: 28 }}>
+          {['Private by default', 'Built around goals', 'Designed for quick daily check-ins'].map((x, i) => (
+            <FadeIn key={x} delay={220 + i * 90}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.card, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: t.cardLine }}>
+                <Ionicons name="checkmark-circle" size={18} color={t.green} style={{ marginRight: 10 }} />
+                <Text style={{ color: t.text, fontSize: 14.5, fontWeight: '600' }}>{x}</Text>
+              </View>
+            </FadeIn>
+          ))}
+        </View>
+      ),
+    },
+    {
+      eyebrow: 'What Sentinel Watches',
+      title: 'Your money picture, condensed.',
+      body: 'Net worth, spend targets, upcoming charges, cash flow, and alerts live together so you do not have to hunt for context.',
+      icon: 'analytics-outline',
+      content: (
+        <View style={{ gap: 12, marginTop: 26 }}>
+          {[
+            ['wallet-outline', 'Net worth', 'Track cash, bank, investments, crypto, property, and business assets.'],
+            ['pulse-outline', 'Alerts', 'See overspending, negative cash flow, and goals that may need attention.'],
+            ['calculator-outline', 'Tools', 'Use calculators and currency conversion without leaving the app.'],
+          ].map(([icon, title, body]) => (
+            <View key={title} style={{ flexDirection: 'row', backgroundColor: t.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: t.cardLine }}>
+              <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: t.bg2, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+                <Ionicons name={icon} size={19} color={t.text} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.text, fontSize: 15, fontWeight: '700' }}>{title}</Text>
+                <Text style={{ color: t.sub, fontSize: 13, lineHeight: 18, marginTop: 3 }}>{body}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      ),
+    },
+    {
+      eyebrow: 'First Goal',
+      title: 'Choose something to build toward.',
+      body: 'Start with one target. You can edit it later, and you can skip this now.',
+      icon: 'flag-outline',
+      content: (
+        <View style={{ backgroundColor: t.card, borderRadius: 22, borderWidth: 1, borderColor: t.cardLine, padding: 18, gap: 12, marginTop: 26 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {[
+              ['Emergency fund', '6000'],
+              ['New car', '25000'],
+              ['Vacation', '3000'],
+            ].map(([label, amount]) => (
+              <Press key={label} onPress={() => { setGoalName(label); setGoalTarget(amount); }} style={{ backgroundColor: goalName === label ? t.graphite : t.bg2, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 12 }}>
+                <Text style={{ color: goalName === label ? t.onGraphite : t.sub, fontSize: 13, fontWeight: '700' }}>{label}</Text>
+              </Press>
+            ))}
+          </View>
+          <FieldBox t={t} value={goalName} onChangeText={setGoalName} placeholder="Goal name" autoCapitalize="words" />
+          <FieldBox t={t} value={goalTarget} onChangeText={setGoalTarget} placeholder="Target amount" keyboardType="decimal-pad" prefix={sym} />
+          <FieldBox t={t} value={goalSaved} onChangeText={setGoalSaved} placeholder="Already saved (optional)" keyboardType="decimal-pad" prefix={sym} />
+          {parseMoney(goalTarget) > 0 ? (
+            <Text style={{ color: t.sub, fontSize: 13, lineHeight: 18 }}>
+              Sentinel will track {formatMoney(parseMoney(goalSaved), sym)} saved toward {formatMoney(parseMoney(goalTarget), sym)}.
+            </Text>
+          ) : null}
+        </View>
+      ),
+    },
+    {
+      eyebrow: 'Daily Rhythm',
+      title: 'Three taps to stay clear.',
+      body: 'Add transactions as they happen, review alerts when the badge appears, and open Goals when you want to update progress.',
+      icon: 'compass-outline',
+      content: (
+        <View style={{ gap: 12, marginTop: 26 }}>
+          {[
+            ['add-circle-outline', 'Add', 'Record spend, income, subscriptions, rent, insurance, and utilities.'],
+            ['shield-checkmark-outline', 'Review', 'Use the home screen as your morning summary.'],
+            ['flag-outline', 'Update', 'Keep your goals current so the app can guide you.'],
+          ].map(([icon, title, body], i) => (
+            <View key={title} style={{ flexDirection: 'row', alignItems: 'flex-start', backgroundColor: t.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: t.cardLine }}>
+              <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: i === 0 ? t.graphite : t.bg2, alignItems: 'center', justifyContent: 'center', marginRight: 13 }}>
+                <Ionicons name={icon} size={17} color={i === 0 ? t.onGraphite : t.text} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.text, fontSize: 15, fontWeight: '700' }}>{title}</Text>
+                <Text style={{ color: t.sub, fontSize: 13, lineHeight: 18, marginTop: 3 }}>{body}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      ),
+    },
+  ];
+  const page = pages[step];
+
+  return (
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
+      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: 54, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 34 }}>
+          <Pressable onPress={back} disabled={step === 0} style={{ opacity: step === 0 ? 0 : 1, padding: 8 }}>
+            <Ionicons name="chevron-back" size={24} color={t.text} />
+          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            {pages.map((_, i) => <View key={i} style={{ width: i === step ? 24 : 7, height: 7, borderRadius: 7, backgroundColor: i === step ? t.graphite : t.cardLine }} />)}
+          </View>
+          <Pressable onPress={skip} style={{ padding: 8 }}>
+            <Text style={{ color: t.sub, fontSize: 13, fontWeight: '700' }}>Skip</Text>
+          </Pressable>
+        </View>
+
+        <Animated.View style={{ flex: 1, opacity: stage, transform: [{ translateX }] }}>
+          <View style={{ width: 68, height: 68, borderRadius: 24, backgroundColor: t.graphite, alignItems: 'center', justifyContent: 'center', marginBottom: 26 }}>
+            <Ionicons name={page.icon} size={31} color={t.onGraphite} />
+          </View>
+          <Text style={{ color: t.gold, fontSize: 12, fontWeight: '800', letterSpacing: 0, marginBottom: 12 }}>{page.eyebrow.toUpperCase()}</Text>
+          <Text style={{ color: t.text, fontSize: 38, lineHeight: 43, fontWeight: '800', letterSpacing: 0 }}>{page.title}</Text>
+          <Text style={{ color: t.sub, fontSize: 16, lineHeight: 24, marginTop: 14 }}>{page.body}</Text>
+          {page.content}
+        </Animated.View>
+
+        <View style={{ marginTop: 28, gap: 12 }}>
+          <PremiumButton t={t} onPress={next} disabled={saving} icon={step >= 3 ? 'checkmark-outline' : 'arrow-forward-outline'}>
+            {saving ? 'Saving...' : step === 2 ? (parseMoney(goalTarget) > 0 ? 'Save goal and continue' : 'Continue without goal') : step >= 3 ? 'Enter Sentinel' : 'Continue'}
+          </PremiumButton>
+          <Pressable onPress={skip} style={{ paddingVertical: 8 }}>
+            <Text style={{ color: t.faint, textAlign: 'center', fontSize: 13, fontWeight: '700' }}>Skip setup</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -227,11 +568,16 @@ export default function Sentinel() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [showBal, setShowBal] = useState(false);
+  const [showAssets, setShowAssets] = useState(false);
   const [subSort, setSubSort] = useState('soonest');
+  const [assets, setAssets] = useState([]);
+  const [goals, setGoals] = useState([]);
 
   const [displayName, setDisplayName] = useState('');
   const [signupName, setSignupName] = useState('');
   const [showPolicy, setShowPolicy] = useState(false);
+  const [onboardingActive, setOnboardingActive] = useState(false);
+  const [onboardingName, setOnboardingName] = useState('');
   const pendingName = useRef(null);
 
   const L = STRINGS[lang] || STRINGS.en;
@@ -247,15 +593,28 @@ export default function Sentinel() {
       if (s) {
         if (pendingName.current) {
           await supabase.from('user_settings').upsert({ user_id: s.user.id, display_name: pendingName.current, updated_at: new Date().toISOString() });
+          setDisplayName(pendingName.current);
+          setOnboardingName(pendingName.current);
+          setOnboardingActive(true);
           pendingName.current = null;
         }
         loadAll();
       }
     });
     return () => l?.subscription.unsubscribe();
+    // The auth subscription should only be installed once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadAll = async () => { loadSettings(); loadTxs(); loadSubs(); };
+  const loadAll = async () => { loadSettings(); loadTxs(); loadSubs(); loadAssets(); loadGoals(); };
+  const loadAssets = async () => {
+    const { data } = await supabase.from('assets').select('*').order('updated_at', { ascending: false });
+    if (data) setAssets(data);
+  };
+  const loadGoals = async () => {
+    const { data } = await supabase.from('goals').select('*').order('created_at', { ascending: false });
+    if (data) setGoals(data);
+  };
   const loadSettings = async () => {
     const { data } = await supabase.from('user_settings').select('*').maybeSingle();
     if (data) {
@@ -283,16 +642,26 @@ export default function Sentinel() {
   };
 
   const signUp = async () => {
+    const cleanName = signupName.trim();
+    if (!cleanName) { Alert.alert('Name required', 'Add your preferred name so Sentinel can personalize setup.'); return; }
+    if (!email.trim() || !password.trim()) { Alert.alert('Details required', 'Enter your email and password to create the account.'); return; }
     setBusy(true);
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (!error && signupName.trim()) {
-      pendingName.current = signupName.trim();
+    pendingName.current = cleanName;
+    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+    if (!error) {
+      setOnboardingName(cleanName);
       if (data.session) {
-        await supabase.from('user_settings').upsert({ user_id: data.user.id, display_name: signupName.trim(), updated_at: new Date().toISOString() });
-        setDisplayName(signupName.trim());
+        await supabase.from('user_settings').upsert({ user_id: data.user.id, display_name: cleanName, updated_at: new Date().toISOString() });
+        setDisplayName(cleanName);
+        setOnboardingActive(true);
+        pendingName.current = null;
+      } else {
+        Alert.alert('Check your email', 'Confirm your account, then sign in and Sentinel will finish setup.');
       }
+    } else {
+      pendingName.current = null;
+      Alert.alert('Error', error.message);
     }
-    Alert.alert(error ? 'Error' : 'OK', error ? error.message : L.createAccount);
     setBusy(false);
   };
   const editName = () => {
@@ -340,6 +709,31 @@ export default function Sentinel() {
   const topCats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const catMax = topCats.length ? topCats[0][1] : 1;
 
+  /* net worth from assets */
+  const netWorth = assets.reduce((s, a) => s + convert(Number(a.amount) || 0, a.currency || 'USD', baseCur), 0);
+  const assetByKind = {};
+  assets.forEach((a) => { const k = a.kind || 'cash'; assetByKind[k] = (assetByKind[k] || 0) + convert(Number(a.amount) || 0, a.currency || 'USD', baseCur); });
+
+  /* monthly cash flow */
+  const monthInflow = txs.filter((x) => INFLOW.includes(x.type) && thisMonth(x.tx_date)).reduce((s, x) => s + convert(x.amount, x.currency || 'USD', baseCur), 0);
+  const cashFlow = monthInflow - monthSpend;
+
+  /* upcoming charges within 7 days */
+  const daysUntil = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); const n = new Date(); n.setHours(0, 0, 0, 0); return Math.round((x - n) / 86400000); };
+  const upcoming = subs.filter((s) => { const dd = daysUntil(s.next_charge_date); return dd >= 0 && dd <= 7; }).sort((a, b) => new Date(a.next_charge_date) - new Date(b.next_charge_date));
+  const upcomingTotal = upcoming.reduce((s, x) => s + convert(x.amount, baseCur, baseCur), 0);
+
+  /* Sentinel Alerts \u2014 computed from real data */
+  const alerts = [];
+  if (over) alerts.push({ icon: 'warning-outline', tone: 'warn', title: 'Spending over target', body: `You've spent ${sym0(baseCur)}${monthSpend.toLocaleString(undefined, { maximumFractionDigits: 0 })} \u2014 past your ${sym0(baseCur)}${target.toLocaleString()} monthly target.` });
+  else if (target > 0 && pct >= 0.85) alerts.push({ icon: 'alert-circle-outline', tone: 'warn', title: 'Almost at your target', body: `You're at ${Math.round(pct * 100)}% of your monthly spending target.` });
+  if (cashFlow < 0) alerts.push({ icon: 'trending-down-outline', tone: 'warn', title: 'Negative cash flow', body: `You're spending ${sym0(baseCur)}${Math.abs(cashFlow).toLocaleString(undefined, { maximumFractionDigits: 0 })} more than you earned this month.` });
+  upcoming.forEach((s) => { const dd = daysUntil(s.next_charge_date); alerts.push({ icon: 'time-outline', tone: 'info', title: `${s.name} due ${dd === 0 ? 'today' : dd === 1 ? 'tomorrow' : `in ${dd} days`}`, body: `${sym0(baseCur)}${Number(s.amount).toFixed(2)} on ${s.next_charge_date}.` }); });
+  goals.forEach((g) => {
+    const gp = Number(g.target_amount) > 0 ? Number(g.current_amount) / Number(g.target_amount) : 0;
+    if (g.deadline) { const d = new Date(g.deadline), nn = new Date(); const ml = (d.getFullYear() - nn.getFullYear()) * 12 + (d.getMonth() - nn.getMonth()); if (ml >= 0 && ml <= 2 && gp < 0.9) alerts.push({ icon: 'flag-outline', tone: 'warn', title: `Goal "${g.name}" falling behind`, body: `${Math.round(gp * 100)}% saved with ${ml === 0 ? 'less than a month' : ml + ' months'} left.` }); }
+  });
+
   const sym = SYMBOL[baseCur] || '$';
   const name = displayName || (session?.user?.email ? session.user.email.split('@')[0] : '');
   const greeting = now.getHours() < 12 ? L.greet.morning : now.getHours() < 18 ? L.greet.afternoon : L.greet.evening;
@@ -351,81 +745,191 @@ export default function Sentinel() {
   /* LOGIN */
   if (!session) {
     return (
-      <View style={{ flex: 1, backgroundColor: t.bg }}>
-        <StatusBar barStyle={dark ? 'light-content' : 'dark-content'} />
-        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingHorizontal: 30, paddingVertical: 80 }}>
-          <View style={{ alignItems: 'center', marginBottom: 50 }}>
-            <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: t.graphite, alignItems: 'center', justifyContent: 'center', marginBottom: 26 }}>
-              <Ionicons name="shield-checkmark" size={28} color={t.onGraphite} />
-            </View>
-            <Text style={{ fontSize: 34, fontWeight: '700', color: t.text, letterSpacing: 6 }}>SENTINEL</Text>
-            <Text style={{ fontSize: 15, color: t.sub, marginTop: 10 }}>{L.tagline}</Text>
-          </View>
-          <TextInput placeholder={`${L.preferredName || 'Preferred name'} (${(L.createAccount || 'Create Account').toLowerCase()})`} placeholderTextColor={t.faint} value={signupName} onChangeText={setSignupName} autoCapitalize="words" style={{ backgroundColor: t.bg2, borderRadius: 14, padding: 16, fontSize: 15, color: t.text, marginBottom: 12 }} />
-          <TextInput placeholder={L.email} placeholderTextColor={t.faint} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" style={{ backgroundColor: t.bg2, borderRadius: 14, padding: 16, fontSize: 15, color: t.text, marginBottom: 12 }} />
-          <TextInput placeholder={L.password} placeholderTextColor={t.faint} value={password} onChangeText={setPassword} secureTextEntry style={{ backgroundColor: t.bg2, borderRadius: 14, padding: 16, fontSize: 15, color: t.text, marginBottom: 20 }} />
-          <Press onPress={login} disabled={busy} style={{ backgroundColor: t.graphite, borderRadius: 14, paddingVertical: 17, marginBottom: 12 }}>
-            <Text style={{ color: t.onGraphite, textAlign: 'center', fontWeight: '600', fontSize: 15 }}>{busy ? L.pleaseWait : L.continueEmail}</Text>
-          </Press>
-          <Press onPress={signUp} disabled={busy} style={{ borderWidth: 1, borderColor: t.cardLine, borderRadius: 14, paddingVertical: 17, marginBottom: 22 }}>
-            <Text style={{ color: t.text, textAlign: 'center', fontWeight: '600', fontSize: 15 }}>{L.createAccount}</Text>
-          </Press>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 22 }}>
-            <View style={{ flex: 1, height: 1, backgroundColor: t.cardLine }} />
-            <Text style={{ color: t.faint, marginHorizontal: 14, fontSize: 12 }}>{L.or}</Text>
-            <View style={{ flex: 1, height: 1, backgroundColor: t.cardLine }} />
-          </View>
-          <Press onPress={() => Alert.alert('Apple', 'TestFlight / App Store only.')} style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', backgroundColor: dark ? '#fff' : '#000', borderRadius: 14, paddingVertical: 16, marginBottom: 12 }}>
-            <Ionicons name="logo-apple" size={18} color={dark ? '#000' : '#fff'} />
-            <Text style={{ color: dark ? '#000' : '#fff', fontWeight: '600', fontSize: 15, marginLeft: 8 }}>{L.continueApple}</Text>
-          </Press>
-          <Press onPress={signInWithGoogle} disabled={busy} style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: t.cardLine, borderRadius: 14, paddingVertical: 16 }}>
-            <Ionicons name="logo-google" size={18} color={t.text} />
-            <Text style={{ color: t.text, fontWeight: '600', fontSize: 15, marginLeft: 8 }}>{L.continueGoogle}</Text>
-          </Press>
-          <Pressable onPress={() => setShowPolicy(true)}>
-            <Text style={{ textAlign: 'center', color: t.faint, fontSize: 12, marginTop: 30, textDecorationLine: 'underline' }}>{L.legalShort}</Text>
-          </Pressable>
-        </ScrollView>
-        <PolicyModal visible={showPolicy} onClose={() => setShowPolicy(false)} t={t} />
-      </View>
+      <AuthScreen
+        t={t}
+        dark={dark}
+        L={L}
+        email={email}
+        password={password}
+        signupName={signupName}
+        busy={busy}
+        showPolicy={showPolicy}
+        setEmail={setEmail}
+        setPassword={setPassword}
+        setSignupName={setSignupName}
+        setShowPolicy={setShowPolicy}
+        login={login}
+        signUp={signUp}
+        signInWithGoogle={signInWithGoogle}
+      />
+    );
+  }
+
+  if (onboardingActive) {
+    return (
+      <OnboardingFlow
+        t={t}
+        dark={dark}
+        name={onboardingName || name}
+        userId={session.user.id}
+        baseCur={baseCur}
+        onFinish={() => {
+          setOnboardingActive(false);
+          loadAll();
+        }}
+      />
     );
   }
 
   const Card = ({ children, style }) => (
-    <View style={[{ backgroundColor: t.card, borderRadius: 22, padding: 22, borderWidth: dark ? 1 : 0, borderColor: t.cardLine, shadowColor: t.shadow, shadowOpacity: dark ? 0 : 0.06, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: dark ? 0 : 3 }, style]}>{children}</View>
+    <View style={[{ backgroundColor: t.card, borderRadius: 22, padding: 22, borderWidth: dark ? 1 : 0, borderColor: t.cardLine, boxShadow: dark ? 'none' : '0 16px 36px rgba(34, 26, 12, 0.08)' }, style]}>{children}</View>
   );
 
   const Home = () => (
     <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 70, paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
-      <Text style={{ color: t.sub, fontSize: 15 }}>{greeting},</Text>
-      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: -0.5, marginBottom: 26, textTransform: 'capitalize' }}>{name}</Text>
-      <Card style={{ marginBottom: 18 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 22 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: t.sub, fontSize: 14, fontWeight: '600' }}>{greeting},</Text>
+          <Text style={{ color: t.text, fontSize: 32, fontWeight: '800', letterSpacing: 0, marginTop: 3, textTransform: 'capitalize' }}>{name}</Text>
+        </View>
+        <Press onPress={() => setTab('alerts')} style={{ width: 44, height: 44, borderRadius: 16, backgroundColor: alerts.length ? t.warn : t.card, borderWidth: alerts.length ? 0 : 1, borderColor: t.cardLine, alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name={alerts.length ? 'notifications' : 'notifications-outline'} size={20} color={alerts.length ? '#fff' : t.text} />
+        </Press>
+      </View>
+
+      {/* NET WORTH */}
+      <Card style={{ marginBottom: 14, padding: 24, backgroundColor: t.graphite }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <View>
+            <Text style={{ color: t.onGraphite, opacity: 0.74, fontSize: 13, fontWeight: '700' }}>NET WORTH</Text>
+            <Text style={{ color: t.onGraphite, opacity: 0.58, fontSize: 12.5, marginTop: 3 }}>Assets tracked by Sentinel</Text>
+          </View>
+          <Ionicons name="shield-checkmark" size={18} color={t.onGraphite} />
+        </View>
+        <AnimatedNumber value={netWorth} prefix={sym} t={{ ...t, text: t.onGraphite }} size={46} weight="800" />
+        {assets.length > 0 && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 16 }}>
+            {Object.entries(assetByKind).filter(([, v]) => v > 0).map(([k, v]) => (
+              <View key={k} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: dark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.14)', borderRadius: 12, paddingVertical: 7, paddingHorizontal: 11, marginRight: 8, marginBottom: 8 }}>
+                <Ionicons name={ASSET_ICON[k]} size={13} color={t.onGraphite} style={{ marginRight: 6 }} />
+                <Text style={{ color: t.onGraphite, opacity: 0.86, fontSize: 12.5, fontWeight: '700' }}>{ASSET_LABEL[k]} {sym}{v.toLocaleString(undefined, { maximumFractionDigits: 0 })}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+        <Press onPress={() => setShowAssets(true)} style={{ marginTop: 16, alignSelf: 'flex-start', borderWidth: 1, borderColor: dark ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.24)', borderRadius: 13, paddingVertical: 10, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center' }}>
+          <Ionicons name="layers-outline" size={15} color={t.onGraphite} style={{ marginRight: 7 }} />
+          <Text style={{ color: t.onGraphite, fontSize: 13.5, fontWeight: '700' }}>Manage Assets</Text>
+        </Press>
+      </Card>
+
+      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+        <Press onPress={() => setShowAdd(true)} style={{ flex: 1, backgroundColor: t.graphite, borderRadius: 18, paddingVertical: 17, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
+          <Ionicons name="add" size={20} color={t.onGraphite} />
+          <Text style={{ color: t.onGraphite, fontWeight: '700', fontSize: 15, marginLeft: 6 }}>{L.addTransaction}</Text>
+        </Press>
+        <Press onPress={() => setTab('goals')} style={{ width: 58, backgroundColor: t.card, borderWidth: 1, borderColor: t.cardLine, borderRadius: 18, alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name="flag-outline" size={20} color={t.text} />
+        </Press>
+      </View>
+
+      {/* MONTHLY SPEND vs TARGET */}
+      <Card style={{ marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <Text style={{ color: t.text, fontSize: 16, fontWeight: '600' }}>{L.thisMonth}</Text>
           <Text style={{ color: over ? t.warn : t.sub, fontSize: 13, fontWeight: '600' }}>{target > 0 ? `${Math.round(pct * 100)}${L.ofTarget}` : L.noTarget}</Text>
         </View>
-        <Text style={{ color: t.sub, fontSize: 13, marginBottom: 6 }}>{L.spent}</Text>
-        <Text style={{ color: over ? t.warn : t.text, fontSize: 34, fontWeight: '700', letterSpacing: -1, marginBottom: 16 }}>{sym}{monthSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-        <View style={{ height: 8, borderRadius: 4, backgroundColor: t.bg2, overflow: 'hidden' }}>
-          <View style={{ width: `${Math.max(pct * 100, target > 0 ? 4 : 0)}%`, height: '100%', borderRadius: 4, backgroundColor: over ? t.warn : t.graphite }} />
+        <Text style={{ color: over ? t.warn : t.text, fontSize: 31, fontWeight: '800', letterSpacing: 0, marginBottom: 14, fontVariant: ['tabular-nums'] }}>{sym}{monthSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+        <View style={{ height: 9, borderRadius: 5, backgroundColor: t.bg2, overflow: 'hidden' }}>
+          <View style={{ width: `${Math.max(pct * 100, target > 0 ? 4 : 0)}%`, height: '100%', borderRadius: 5, backgroundColor: over ? t.warn : t.mint }} />
         </View>
-        {over && <Text style={{ color: t.warn, fontSize: 12.5, marginTop: 12 }}>{L.overTarget}</Text>}
         {target > 0 && !over && <Text style={{ color: t.sub, fontSize: 12.5, marginTop: 12 }}>{sym}{(target - monthSpend).toLocaleString(undefined, { maximumFractionDigits: 0 })} {L.leftOf} {sym}{target.toLocaleString()} {L.targetWord}</Text>}
+        {over && <Text style={{ color: t.warn, fontSize: 12.5, marginTop: 12 }}>{L.overTarget}</Text>}
       </Card>
-      <Card style={{ marginBottom: 18 }}>
-        <Text style={{ color: t.sub, fontSize: 13, marginBottom: 8 }}>{L.currentBalance}</Text>
-        <AnimatedNumber value={balance} prefix={sym} t={t} size={46} />
-        <Press onPress={() => setShowBal(true)} style={{ marginTop: 18, alignSelf: 'flex-start', borderWidth: 1, borderColor: t.cardLine, borderRadius: 12, paddingVertical: 9, paddingHorizontal: 16 }}>
-          <Text style={{ color: t.text, fontSize: 13.5, fontWeight: '600' }}>{L.changeBalance}</Text>
-        </Press>
+
+      {/* CASH FLOW */}
+      <Card style={{ marginBottom: 16 }}>
+        <Text style={{ color: t.text, fontSize: 16, fontWeight: '600', marginBottom: 14 }}>Monthly Cash Flow</Text>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          {[
+            ['In', monthInflow, t.green, 'arrow-down-left'],
+            ['Out', monthSpend, t.text, 'arrow-up-right'],
+            ['Net', Math.abs(cashFlow), cashFlow >= 0 ? t.green : t.warn, cashFlow >= 0 ? 'trending-up' : 'trending-down'],
+          ].map(([label, value, color, icon]) => (
+            <View key={label} style={{ flex: 1, backgroundColor: t.bg2, borderRadius: 14, padding: 12 }}>
+              <Ionicons name={icon} size={15} color={color} />
+              <Text style={{ color: t.sub, fontSize: 12, marginTop: 8 }}>{label}</Text>
+              <Text style={{ color, fontSize: 16, fontWeight: '800', marginTop: 3, fontVariant: ['tabular-nums'] }}>{label === 'Net' && cashFlow >= 0 ? '+' : label === 'Net' ? '\u2212' : ''}{sym}{Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}</Text>
+            </View>
+          ))}
+        </View>
       </Card>
-      <Press onPress={() => setShowAdd(true)} style={{ backgroundColor: t.graphite, borderRadius: 18, paddingVertical: 19, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}>
-        <Ionicons name="add" size={20} color={t.onGraphite} />
-        <Text style={{ color: t.onGraphite, fontWeight: '600', fontSize: 16, marginLeft: 6 }}>{L.addTransaction}</Text>
+
+      {/* UPCOMING CHARGES */}
+      <Press onPress={() => setTab('subs')}>
+        <Card style={{ marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: upcoming.length ? 14 : 0 }}>
+            <Text style={{ color: t.text, fontSize: 16, fontWeight: '600' }}>Next 7 Days</Text>
+            <Text style={{ color: t.sub, fontSize: 13, fontWeight: '600' }}>{sym}{upcomingTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</Text>
+          </View>
+          {upcoming.length === 0 ? <Text style={{ color: t.faint, fontSize: 13.5 }}>No charges coming up. You are clear.</Text> : upcoming.slice(0, 3).map((s) => {
+            const dd = daysUntil(s.next_charge_date);
+            return (
+              <View key={s.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 7 }}>
+                <Text style={{ color: t.text, fontSize: 14 }}>{s.name}</Text>
+                <Text style={{ color: t.sub, fontSize: 13 }}>{dd === 0 ? 'Today' : dd === 1 ? 'Tomorrow' : `${dd}d`} {'\u00B7'} {sym}{Number(s.amount).toFixed(0)}</Text>
+              </View>
+            );
+          })}
+        </Card>
       </Press>
+
+      {/* SENTINEL ALERTS */}
+      <Press onPress={() => setTab('alerts')}>
+        <Card style={{ marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: alerts.length ? 14 : 0 }}>
+            <Text style={{ color: t.text, fontSize: 16, fontWeight: '600' }}>Sentinel Alerts</Text>
+            {alerts.length > 0 && <View style={{ backgroundColor: t.warn, borderRadius: 10, minWidth: 20, paddingHorizontal: 6, paddingVertical: 1, alignItems: 'center' }}><Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{alerts.length}</Text></View>}
+          </View>
+          {alerts.length === 0 ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}><Ionicons name="checkmark-circle" size={17} color="#34C759" style={{ marginRight: 8 }} /><Text style={{ color: t.sub, fontSize: 13.5 }}>All clear. Nothing needs your attention.</Text></View>
+          ) : alerts.slice(0, 3).map((a, i) => (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 7 }}>
+              <Ionicons name={a.icon} size={16} color={a.tone === 'warn' ? t.warn : t.sub} style={{ marginRight: 10, marginTop: 1 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: t.text, fontSize: 14, fontWeight: '600' }}>{a.title}</Text>
+                <Text style={{ color: t.sub, fontSize: 12.5, marginTop: 1 }}>{a.body}</Text>
+              </View>
+            </View>
+          ))}
+        </Card>
+      </Press>
+
+      {/* GOALS PROGRESS */}
+      <Press onPress={() => setTab('goals')}>
+        <Card style={{ marginBottom: 16 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: goals.length ? 16 : 0 }}>
+            <Text style={{ color: t.text, fontSize: 16, fontWeight: '600' }}>Goals</Text>
+            <Ionicons name="chevron-forward" size={16} color={t.faint} />
+          </View>
+          {goals.length === 0 ? <Text style={{ color: t.faint, fontSize: 13.5 }}>No goals yet. Tap to set your first target.</Text> : goals.slice(0, 2).map((g) => {
+            const gp = Number(g.target_amount) > 0 ? Number(g.current_amount) / Number(g.target_amount) : 0;
+            return (
+              <View key={g.id} style={{ marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text style={{ color: t.sub, fontSize: 13.5 }}>{g.name}</Text>
+                  <Text style={{ color: t.text, fontSize: 13.5, fontWeight: '600' }}>{Math.round(gp * 100)}%</Text>
+                </View>
+                <View style={{ height: 6, borderRadius: 3, backgroundColor: t.bg2, overflow: 'hidden' }}><View style={{ width: `${Math.min(gp * 100, 100)}%`, height: '100%', backgroundColor: gp >= 1 ? '#34C759' : t.graphite, borderRadius: 3 }} /></View>
+              </View>
+            );
+          })}
+        </Card>
+      </Press>
+
+      {/* TOP CATEGORIES */}
       {topCats.length > 0 && (
-        <Card style={{ marginTop: 18 }}>
+        <Card style={{ marginBottom: 16 }}>
           <Text style={{ color: t.text, fontSize: 16, fontWeight: '600', marginBottom: 18 }}>{L.topCategories}</Text>
           {topCats.map(([c, v]) => (
             <View key={c} style={{ marginBottom: 14 }}>
@@ -438,12 +942,49 @@ export default function Sentinel() {
           ))}
         </Card>
       )}
+
+      {/* SENTINEL BRIEF (premium teaser) */}
+      <Card style={{ opacity: 0.85 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={{ color: t.text, fontSize: 16, fontWeight: '600' }}>Sentinel Brief</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.bg2, borderRadius: 10, paddingVertical: 5, paddingHorizontal: 10 }}>
+            <Ionicons name="lock-closed" size={12} color={t.sub} style={{ marginRight: 5 }} />
+            <Text style={{ color: t.sub, fontSize: 11.5, fontWeight: '700' }}>PREMIUM</Text>
+          </View>
+        </View>
+        <Text style={{ color: t.sub, fontSize: 13.5, marginTop: 10, lineHeight: 19 }}>Your daily 2-minute finance briefing - markets, crypto, currencies and economy, summarized. Arriving with Sentinel Premium.</Text>
+      </Card>
+    </ScrollView>
+  );
+
+  const AlertsScreen = () => (
+    <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 70, paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
+      <Press onPress={() => setTab('home')} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 18 }}>
+        <Ionicons name="chevron-back" size={22} color={t.text} /><Text style={{ color: t.text, fontSize: 16, fontWeight: '600', marginLeft: 2 }}>Home</Text>
+      </Press>
+      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: 0, marginBottom: 4 }}>Sentinel Alerts</Text>
+      <Text style={{ color: t.sub, fontSize: 14, marginBottom: 24 }}>What needs your attention.</Text>
+      {alerts.length === 0 ? (
+        <View style={{ alignItems: 'center', marginTop: 50 }}>
+          <View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: t.bg2, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}><Ionicons name="checkmark-circle-outline" size={30} color="#34C759" /></View>
+          <Text style={{ color: t.text, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>All clear</Text>
+          <Text style={{ color: t.sub, fontSize: 13.5, textAlign: 'center', paddingHorizontal: 30 }}>Nothing needs your attention right now. Sentinel will let you know.</Text>
+        </View>
+      ) : alerts.map((a, i) => (
+        <Card key={i} style={{ marginBottom: 12, flexDirection: 'row', alignItems: 'flex-start', padding: 18 }}>
+          <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: a.tone === 'warn' ? (dark ? '#2A1515' : '#FBEAEA') : t.bg2, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}><Ionicons name={a.icon} size={18} color={a.tone === 'warn' ? t.warn : t.text} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.text, fontSize: 15, fontWeight: '600' }}>{a.title}</Text>
+            <Text style={{ color: t.sub, fontSize: 13, marginTop: 3, lineHeight: 18 }}>{a.body}</Text>
+          </View>
+        </Card>
+      ))}
     </ScrollView>
   );
 
   const Transactions = () => (
     <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 70, paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
-      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: -0.5, marginBottom: 4 }}>{L.transactions}</Text>
+      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: 0, marginBottom: 4 }}>{L.transactions}</Text>
       <Text style={{ color: t.sub, fontSize: 14, marginBottom: 24 }}>{L.txSubtitle}</Text>
       {txs.length === 0 ? (<Text style={{ color: t.faint, textAlign: 'center', marginTop: 60 }}>{L.noTx}</Text>) : txs.map((x) => (
         <Card key={x.id} style={{ marginBottom: 12, padding: 16, flexDirection: 'row', alignItems: 'center' }}>
@@ -466,10 +1007,10 @@ export default function Sentinel() {
 
   const Analytics = () => (
     <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 70, paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
-      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: -0.5, marginBottom: 24 }}>{L.analytics}</Text>
+      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: 0, marginBottom: 24 }}>{L.analytics}</Text>
       <Card style={{ marginBottom: 18 }}>
         <Text style={{ color: t.sub, fontSize: 13, marginBottom: 6 }}>{L.spentThisMonth}</Text>
-        <Text style={{ color: over ? t.warn : t.text, fontSize: 38, fontWeight: '700', letterSpacing: -1 }}>{sym}{monthSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+        <Text style={{ color: over ? t.warn : t.text, fontSize: 38, fontWeight: '700', letterSpacing: 0, fontVariant: ['tabular-nums'] }}>{sym}{monthSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
       </Card>
       <Card style={{ marginBottom: 18 }}>
         <Text style={{ color: t.text, fontSize: 16, fontWeight: '600', marginBottom: 18 }}>{L.byCategory}</Text>
@@ -498,7 +1039,10 @@ export default function Sentinel() {
 
   const Subscriptions = () => (
     <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 70, paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
-      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: -0.5, marginBottom: 4 }}>{L.subscriptions}</Text>
+      <Press onPress={() => setTab('home')} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 18 }}>
+        <Ionicons name="chevron-back" size={22} color={t.text} /><Text style={{ color: t.text, fontSize: 16, fontWeight: '600', marginLeft: 2 }}>Home</Text>
+      </Press>
+      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: 0, marginBottom: 4 }}>{L.subscriptions}</Text>
       <Text style={{ color: t.sub, fontSize: 14, marginBottom: 18 }}>{L.subsSubtitle}</Text>
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 20 }}>
         {[['soonest', L.soonest], ['largest', L.largest], ['alpha', L.az]].map(([k, lbl]) => (
@@ -530,7 +1074,7 @@ export default function Sentinel() {
 
   const Settings = () => (
     <ScrollView contentContainerStyle={{ padding: 22, paddingTop: 70, paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
-      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: -0.5, marginBottom: 24 }}>{L.settings}</Text>
+      <Text style={{ color: t.text, fontSize: 30, fontWeight: '700', letterSpacing: 0, marginBottom: 24 }}>{L.settings}</Text>
       <Text style={{ color: t.faint, fontSize: 12, letterSpacing: 1, marginBottom: 6, marginLeft: 4 }}>{L.appearance}</Text>
       <Card style={{ marginBottom: 22, paddingVertical: 6 }}>
         <View style={{ flexDirection: 'row', gap: 8, padding: 8 }}>
@@ -572,9 +1116,12 @@ export default function Sentinel() {
     </ScrollView>
   );
 
-  const screens = { home: Home, tx: Transactions, analytics: Analytics, subs: Subscriptions, settings: Settings };
-  const Active = screens[tab];
-  const NAV = [['home', 'home-outline', 'home'], ['tx', 'receipt-outline', 'receipt'], ['analytics', 'stats-chart-outline', 'stats-chart'], ['subs', 'repeat-outline', 'repeat'], ['settings', 'settings-outline', 'settings']];
+  const ToolsScreen = () => <Tools t={t} baseCur={baseCur} />;
+  const GoalsScreen = () => <Goals t={t} baseCur={baseCur} userId={session.user.id} goals={goals} reload={loadGoals} />;
+
+  const screens = { home: Home, tx: Transactions, analytics: Analytics, tools: ToolsScreen, goals: GoalsScreen, settings: Settings, subs: Subscriptions, alerts: AlertsScreen };
+  const Active = screens[tab] || Home;
+  const NAV = [['home', 'home-outline', 'home'], ['tx', 'receipt-outline', 'receipt'], ['tools', 'calculator-outline', 'calculator'], ['goals', 'flag-outline', 'flag'], ['settings', 'settings-outline', 'settings']];
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -587,6 +1134,7 @@ export default function Sentinel() {
       </View>
       <AddSheet visible={showAdd} onClose={() => setShowAdd(false)} t={t} L={L} lang={lang} baseCur={baseCur} balance={balance} userId={session.user.id} onSaved={() => { loadTxs(); loadSubs(); }} onBalanceChange={setBalanceDB} />
       <BalanceSheet visible={showBal} onClose={() => setShowBal(false)} t={t} L={L} userId={session.user.id} balance={balance} target={target} baseCur={baseCur} onSaved={(b, tg, c) => { setBalance(b); setTarget(tg); setBaseCur(c); }} />
+      <AssetsSheet visible={showAssets} onClose={() => setShowAssets(false)} t={t} userId={session.user.id} baseCur={baseCur} assets={assets} reload={loadAssets} />
       <PolicyModal visible={showPolicy} onClose={() => setShowPolicy(false)} t={t} />
     </View>
   );
@@ -680,7 +1228,7 @@ function BalanceSheet({ visible, onClose, t, L, userId, balance, target, baseCur
   const [tg, setTg] = useState(String(target || ''));
   const [cur, setCur] = useState(baseCur);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { setBal(String(balance || '')); setTg(String(target || '')); setCur(baseCur); }, [visible]);
+  useEffect(() => { setBal(String(balance || '')); setTg(String(target || '')); setCur(baseCur); }, [visible, balance, target, baseCur]);
   const save = async () => {
     setBusy(true);
     const { error } = await supabase.from('user_settings').upsert({ user_id: userId, balance: parseFloat(bal) || 0, target_spend: parseFloat(tg) || 0, base_currency: cur, updated_at: new Date().toISOString() });
@@ -736,7 +1284,7 @@ function PolicyModal({ visible, onClose, t }) {
           </Section>
 
           <Section title="Terms of Service">
-            Sentinel is a personal finance tracking tool provided on an "as is" basis. It helps you record and review your own spending, balances, and recurring payments. Sentinel is not a bank, is not financial advice, and does not move or hold money. You are responsible for the accuracy of the information you enter. You agree not to misuse the service, attempt unauthorized access, or use it for unlawful purposes. We may update the app and these terms over time; continued use means you accept the current version.
+            Sentinel is a personal finance tracking tool provided as is. It helps you record and review your own spending, balances, and recurring payments. Sentinel is not a bank, is not financial advice, and does not move or hold money. You are responsible for the accuracy of the information you enter. You agree not to misuse the service, attempt unauthorized access, or use it for unlawful purposes. We may update the app and these terms over time; continued use means you accept the current version.
           </Section>
 
           <Section title="Data Policy">
@@ -746,6 +1294,80 @@ function PolicyModal({ visible, onClose, t }) {
           <Text style={{ color: t.faint, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
             Questions about any of the above? Contact support@sentinel.app
           </Text>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/* ============================================================
+   ASSETS / NET WORTH SHEET
+   ============================================================ */
+function AssetsSheet({ visible, onClose, t, userId, baseCur, assets, reload }) {
+  const sym = SYMBOL[baseCur] || '$';
+  const netWorth = assets.reduce((s, a) => s + convert(Number(a.amount) || 0, a.currency || 'USD', baseCur), 0);
+
+  const addAsset = (kind, label) => {
+    Alert.prompt(`Add ${label}`, `Value in ${baseCur}`, async (text) => {
+      const v = parseFloat(String(text).replace(/,/g, ''));
+      if (isNaN(v)) return;
+      await supabase.from('assets').insert([{ user_id: userId, kind, label, amount: v, currency: baseCur }]);
+      reload && reload();
+    }, 'plain-text', '');
+  };
+  const editAsset = (a) => {
+    Alert.prompt(a.label || ASSET_LABEL[a.kind], `Value in ${a.currency || baseCur}`, async (text) => {
+      const v = parseFloat(String(text).replace(/,/g, ''));
+      if (isNaN(v)) return;
+      await supabase.from('assets').update({ amount: v, updated_at: new Date().toISOString() }).eq('id', a.id);
+      reload && reload();
+    }, 'plain-text', String(a.amount || ''));
+  };
+  const removeAsset = (a) => {
+    Alert.alert('Remove?', a.label || ASSET_LABEL[a.kind], [{ text: 'Cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => { await supabase.from('assets').delete().eq('id', a.id); reload && reload(); } }]);
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: t.bg }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: 22 }}>
+          <Text style={{ color: t.text, fontSize: 22, fontWeight: '700' }}>Total Assets</Text>
+          <Pressable onPress={onClose}><Ionicons name="close" size={26} color={t.sub} /></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+          <View style={{ backgroundColor: t.bg2, borderRadius: 18, padding: 20, marginBottom: 24 }}>
+            <Text style={{ color: t.sub, fontSize: 13, marginBottom: 6 }}>Net Worth</Text>
+            <Text style={{ color: t.text, fontSize: 36, fontWeight: '700', letterSpacing: 0, fontVariant: ['tabular-nums'] }}>{sym}{netWorth.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+          </View>
+
+          <Text style={{ color: t.faint, fontSize: 12, letterSpacing: 1, marginBottom: 12 }}>ADD AN ASSET</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 24 }}>
+            {ASSET_KINDS.map(([kind, label, icon]) => (
+              <Press key={kind} onPress={() => addAsset(kind, label)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12, marginRight: 8, marginBottom: 8, backgroundColor: t.bg2 }}>
+                <Ionicons name={icon} size={15} color={t.text} style={{ marginRight: 7 }} />
+                <Text style={{ color: t.text, fontSize: 13.5, fontWeight: '600' }}>{label}</Text>
+                <Ionicons name="add" size={15} color={t.sub} style={{ marginLeft: 5 }} />
+              </Press>
+            ))}
+          </View>
+
+          {assets.length > 0 && <Text style={{ color: t.faint, fontSize: 12, letterSpacing: 1, marginBottom: 12 }}>YOUR ASSETS</Text>}
+          {assets.map((a) => (
+            <Press key={a.id} onPress={() => editAsset(a)} style={{ marginBottom: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.card, borderRadius: 16, padding: 16, borderWidth: t.bg === '#0B0B0B' ? 1 : 0, borderColor: t.cardLine }}>
+                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.bg2, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+                  <Ionicons name={ASSET_ICON[a.kind] || 'cube-outline'} size={18} color={t.text} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: t.text, fontSize: 15, fontWeight: '600' }}>{a.label || ASSET_LABEL[a.kind]}</Text>
+                  <Text style={{ color: t.sub, fontSize: 12.5, marginTop: 2 }}>{ASSET_LABEL[a.kind]}</Text>
+                </View>
+                <Text style={{ color: t.text, fontSize: 16, fontWeight: '700', marginRight: 10 }}>{SYMBOL[a.currency] || sym}{Number(a.amount).toLocaleString(undefined, { maximumFractionDigits: 0 })}</Text>
+                <Pressable onPress={() => removeAsset(a)} hitSlop={8}><Ionicons name="trash-outline" size={17} color={t.faint} /></Pressable>
+              </View>
+            </Press>
+          ))}
+          {assets.length === 0 && <Text style={{ color: t.faint, fontSize: 13.5, textAlign: 'center', marginTop: 20 }}>Add what you own above to see your net worth.</Text>}
         </ScrollView>
       </View>
     </Modal>
